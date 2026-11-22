@@ -1,0 +1,327 @@
+﻿<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>BanglaBhai lang</title></head>
+<body style="font-family:monospace;background:#111;color:#eee;padding:20px">
+<h2>BanglaBhai lang Playground</h2>
+<textarea id="code" style="width:100%;height:300px;background:#222;color:#eee">shuru bhai
+  dekha bhai "Hello Bangladesh";
+  bhai eta holo a = 0;
+  jotokkhon bhai (a &lt; 3) {
+    dekha bhai a;
+    a += 1;
+  }
+shesh bhai</textarea><br>
+<button onclick="go()">Run</button>
+<pre id="out"></pre>
+<script>
+function load(f){const m={exports:{}};f(m);return m.exports;}
+const {tokenize}=load(function(module){ const KEYWORDS = [
+  "porerta dekh bhai", "bhai eta holo", "jotokkhon bhai", "othoba bhai",
+  "nahoy bhai", "shuru bhai", "shesh bhai", "dekha bhai", "jodi bhai", "thamo bhai"
+];
+const TWO = ["==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "&&", "||"];
+const ONE = "+-*/%<>=(){};,!";
+
+function tokenize(src) {
+  const tokens = [];
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (src.startsWith("//", i)) {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "\"") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== "\"") j++;
+      if (j >= src.length) throw new Error("String shesh hoyni");
+      tokens.push({ type: "STRING", value: src.slice(i + 1, j) });
+      i = j + 1;
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      let j = i;
+      while (j < src.length && /[0-9.]/.test(src[j])) j++;
+      tokens.push({ type: "NUMBER", value: Number(src.slice(i, j)) });
+      i = j;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      const kw = KEYWORDS.find(k => src.startsWith(k, i) && !/[A-Za-z0-9_]/.test(src[i + k.length] || ""));
+      if (kw) {
+        tokens.push({ type: "KEYWORD", value: kw });
+        i += kw.length;
+        continue;
+      }
+      let j = i;
+      while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+      const w = src.slice(i, j);
+      if (w === "thik") tokens.push({ type: "BOOL", value: true });
+      else if (w === "vul") tokens.push({ type: "BOOL", value: false });
+      else if (w === "faka") tokens.push({ type: "NULL", value: null });
+      else tokens.push({ type: "IDENT", value: w });
+      i = j;
+      continue;
+    }
+    const two = src.slice(i, i + 2);
+    if (TWO.includes(two)) { tokens.push({ type: "OP", value: two }); i += 2; continue; }
+    if (ONE.includes(ch)) { tokens.push({ type: "OP", value: ch }); i++; continue; }
+    throw new Error("Ojana character: " + ch);
+  }
+  return tokens;
+}
+
+module.exports = { tokenize }; });
+const {parse}=load(function(module){ function parse(tokens) {
+  let p = 0;
+  const peek = () => tokens[p];
+  const next = () => tokens[p++];
+  const isKw = (v) => peek() && peek().type === "KEYWORD" && peek().value === v;
+  const isOp = (v) => peek() && peek().type === "OP" && peek().value === v;
+  const expectKw = (v) => { if (!isKw(v)) throw new Error(v + " lagbe"); next(); };
+  const expectOp = (v) => {
+    if (!isOp(v)) throw new Error(v + " lagbe, pawa gelo: " + (peek() ? peek().value : "kichu na"));
+    next();
+  };
+
+  function program() {
+    expectKw("shuru bhai");
+    const body = [];
+    while (peek() && !isKw("shesh bhai")) body.push(statement());
+    expectKw("shesh bhai");
+    return { type: "Program", body };
+  }
+
+  function block() {
+    expectOp("{");
+    const body = [];
+    while (peek() && !isOp("}")) body.push(statement());
+    expectOp("}");
+    return { type: "Block", body };
+  }
+
+  function statement() {
+    if (isOp("{")) return block();
+    if (isKw("bhai eta holo")) {
+      next();
+      const t = next();
+      if (!t || t.type !== "IDENT") throw new Error("Variable er nam lagbe");
+      let init = null;
+      if (isOp("=")) { next(); init = expr(); }
+      expectOp(";");
+      return { type: "VarDecl", name: t.value, init };
+    }
+    if (isKw("dekha bhai")) {
+      next();
+      const args = [expr()];
+      while (isOp(",")) { next(); args.push(expr()); }
+      expectOp(";");
+      return { type: "Print", args };
+    }
+    if (isKw("jodi bhai")) return ifStatement();
+    if (isKw("jotokkhon bhai")) {
+      next();
+      expectOp("(");
+      const test = expr();
+      expectOp(")");
+      return { type: "While", test, body: block() };
+    }
+    if (isKw("thamo bhai")) { next(); expectOp(";"); return { type: "Break" }; }
+    if (isKw("porerta dekh bhai")) { next(); expectOp(";"); return { type: "Continue" }; }
+    const e = expr();
+    expectOp(";");
+    return { type: "ExprStmt", expr: e };
+  }
+
+  function ifStatement() {
+    next();
+    expectOp("(");
+    const test = expr();
+    expectOp(")");
+    const consequent = block();
+    let alternate = null;
+    if (isKw("othoba bhai")) alternate = ifStatement();
+    else if (isKw("nahoy bhai")) { next(); alternate = block(); }
+    return { type: "If", test, consequent, alternate };
+  }
+
+  function expr() {
+    const t = peek();
+    const n = tokens[p + 1];
+    if (t && t.type === "IDENT" && n && n.type === "OP" && ["=", "+=", "-=", "*=", "/="].includes(n.value)) {
+      next();
+      const op = next().value;
+      return { type: "Assign", op, name: t.value, value: expr() };
+    }
+    return binary(() => binary(() => binary(() => binary(() => binary(() => binary(unary, ["*", "/", "%"]), ["+", "-"]), ["<", ">", "<=", ">="]), ["==", "!="]), ["&&"]), ["||"]);
+  }
+
+  function binary(sub, ops) {
+    let left = sub();
+    while (peek() && peek().type === "OP" && ops.includes(peek().value)) {
+      const op = next().value;
+      left = { type: "Binary", op, left, right: sub() };
+    }
+    return left;
+  }
+
+  function unary() {
+    if (isOp("-") || isOp("!")) {
+      const op = next().value;
+      return { type: "Unary", op, arg: unary() };
+    }
+    return primary();
+  }
+
+  function primary() {
+    const t = next();
+    if (!t) throw new Error("Expression ashha korechilam, kintu code shesh");
+    if (t.type === "NUMBER" || t.type === "STRING" || t.type === "BOOL" || t.type === "NULL") return { type: "Literal", value: t.value };
+    if (t.type === "IDENT") return { type: "Ident", name: t.value };
+    if (t.type === "OP" && t.value === "(") {
+      const e = expr();
+      expectOp(")");
+      return e;
+    }
+    throw new Error("Ashha korini: " + t.value);
+  }
+
+  return program();
+}
+
+module.exports = { parse };
+ });
+const {run}=load(function(module){ class BreakSignal {}
+class ContinueSignal {}
+
+class Scope {
+  constructor(parent) { this.vars = new Map(); this.parent = parent; }
+  declare(name, value) { this.vars.set(name, value); }
+  find(name) {
+    let s = this;
+    while (s) { if (s.vars.has(name)) return s; s = s.parent; }
+    return null;
+  }
+  get(name) {
+    const s = this.find(name);
+    if (!s) throw new Error(name + " declare kora hoyni");
+    return s.vars.get(name);
+  }
+  set(name, value) {
+    const s = this.find(name);
+    if (!s) throw new Error(name + " declare kora hoyni");
+    s.vars.set(name, value);
+  }
+}
+
+function show(v) {
+  if (v === null) return "faka";
+  if (v === true) return "thik";
+  if (v === false) return "vul";
+  return String(v);
+}
+
+function evaluate(node, scope) {
+  switch (node.type) {
+    case "Literal": return node.value;
+    case "Ident": return scope.get(node.name);
+    case "Unary": {
+      const v = evaluate(node.arg, scope);
+      return node.op === "-" ? -v : !v;
+    }
+    case "Assign": {
+      const v = evaluate(node.value, scope);
+      let result = v;
+      if (node.op !== "=") result = calc(node.op[0], scope.get(node.name), v);
+      scope.set(node.name, result);
+      return result;
+    }
+    case "Binary": {
+      if (node.op === "&&") {
+        const l = evaluate(node.left, scope);
+        return l ? evaluate(node.right, scope) : l;
+      }
+      if (node.op === "||") {
+        const l = evaluate(node.left, scope);
+        return l ? l : evaluate(node.right, scope);
+      }
+      return calc(node.op, evaluate(node.left, scope), evaluate(node.right, scope));
+    }
+  }
+  throw new Error("Ojana expression: " + node.type);
+}
+
+function calc(op, a, b) {
+  switch (op) {
+    case "+": return a + b;
+    case "-": return a - b;
+    case "*": return a * b;
+    case "/":
+      if (b === 0) throw new Error("Shunno diye bhag kora jay na");
+      return a / b;
+    case "%": return a % b;
+    case "<": return a < b;
+    case ">": return a > b;
+    case "<=": return a <= b;
+    case ">=": return a >= b;
+    case "==": return a === b;
+    case "!=": return a !== b;
+  }
+  throw new Error("Ojana operator: " + op);
+}
+
+function exec(node, scope) {
+  switch (node.type) {
+    case "Program":
+      for (const s of node.body) exec(s, scope);
+      return;
+    case "Block": {
+      const inner = new Scope(scope);
+      for (const s of node.body) exec(s, inner);
+      return;
+    }
+    case "VarDecl":
+      scope.declare(node.name, node.init ? evaluate(node.init, scope) : null);
+      return;
+    case "Print":
+      console.log(node.args.map(a => show(evaluate(a, scope))).join(" "));
+      return;
+    case "ExprStmt":
+      evaluate(node.expr, scope);
+      return;
+    case "If":
+      if (evaluate(node.test, scope)) exec(node.consequent, scope);
+      else if (node.alternate) exec(node.alternate, scope);
+      return;
+    case "While":
+      while (evaluate(node.test, scope)) {
+        try {
+          exec(node.body, scope);
+        } catch (e) {
+          if (e instanceof BreakSignal) break;
+          if (e instanceof ContinueSignal) continue;
+          throw e;
+        }
+      }
+      return;
+    case "Break": throw new BreakSignal();
+    case "Continue": throw new ContinueSignal();
+  }
+  throw new Error("Ojana statement: " + node.type);
+}
+
+function run(ast) {
+  exec(ast, new Scope(null));
+}
+
+module.exports = { run }; });
+function go(){
+  const out=[]; const old=console.log;
+  console.log=(...a)=>out.push(a.join(" "));
+  try{ run(parse(tokenize(document.getElementById("code").value))); }
+  catch(e){ out.push("Error: "+e.message); }
+  console.log=old;
+  document.getElementById("out").textContent=out.join("\n");
+}
+</script>
+</body></html>
